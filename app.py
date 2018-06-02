@@ -1,3 +1,5 @@
+import bcrypt
+import concurrent.futures
 import json
 import os
 import urllib
@@ -5,6 +7,7 @@ import urllib
 import arrow
 import psycopg2
 import psycopg2.extras
+from tornado import gen
 import tornado.auth
 import tornado.concurrent
 import tornado.ioloop
@@ -13,6 +16,8 @@ import tornado.web
 conn = ''
 DB_CONNECTION = os.environ.get('DB_CONNECTION',
                                'postgresql://postgres:example@localhost:5444')
+
+executor = concurrent.futures.ThreadPoolExecutor(2)
 
 try:
     conn = psycopg2.connect(DB_CONNECTION)
@@ -30,6 +35,11 @@ def get_token(aid):
     return key
 
 
+class BaseHandler(tornado.web.RequestHandler):
+    def get_current_user(self):
+        return self.get_secure_cookie("user")
+
+
 class AWeberMixin(tornado.auth.OAuthMixin):
 
     _OAUTH_REQUEST_TOKEN_URL = 'https://auth.aweber.com/1.0/oauth/request_token'
@@ -43,7 +53,7 @@ class AWeberMixin(tornado.auth.OAuthMixin):
             'secret': os.environ.get('CONSUMER_SECRET', '')
         }
 
-    @tornado.gen.coroutine
+    @gen.coroutine
     def _oauth_get_user_future(self, access_token):
         r = yield self.aweber_request('https://api.aweber.com/1.0/accounts',
                                       access_token=access_token)
@@ -62,7 +72,7 @@ class AWeberMixin(tornado.auth.OAuthMixin):
             conn.commit()
         return {'user': r}
 
-    @tornado.gen.coroutine
+    @gen.coroutine
     def aweber_request(self,
                        url, access_token=None, post_args=None, **args):
         if access_token:
@@ -90,7 +100,7 @@ class AWeberMixin(tornado.auth.OAuthMixin):
 
 
 class BroadcastHandler(tornado.web.RequestHandler, AWeberMixin):
-    @tornado.gen.coroutine
+    @gen.coroutine
     def get(self, aid):
         access_token = get_token(aid)
         r = yield self.aweber_request(
@@ -100,7 +110,7 @@ class BroadcastHandler(tornado.web.RequestHandler, AWeberMixin):
         self.set_header('Content-Type', 'application/json')
         self.write(r.body)
 
-    @tornado.gen.coroutine
+    @gen.coroutine
     def post(self, aid):
         access_token = get_token(aid)
         data = tornado.escape.json_decode(self.request.body)
@@ -128,7 +138,7 @@ class BroadcastHandler(tornado.web.RequestHandler, AWeberMixin):
 
 
 class AuthHandler(tornado.web.RequestHandler, AWeberMixin):
-    @tornado.gen.coroutine
+    @gen.coroutine
     def get(self):
         if self.get_argument('oauth_token', None):
             r = yield self.get_authenticated_user()
@@ -143,16 +153,81 @@ class AuthHandler(tornado.web.RequestHandler, AWeberMixin):
         self.redirect("/")
 
 
+class MainHandler(BaseHandler):
+    @tornado.web.authenticated
+    def get(self):
+        name = tornado.escape.xhtml_escape(self.current_user)
+        self.write("Hello, " + name)
+
+
+class LoginHandler(BaseHandler):
+    def get(self):
+        self.render("login.html", error=None)
+
+    @gen.coroutine
+    def post(self):
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as curs:
+            curs.execute('''SELECT * FROM users WHERE email = %s''',
+                         (self.get_argument("email"), ))
+            user = curs.fetchone()
+
+        if user is None:
+            self.render("login.html", error="email not found")
+            return
+
+        matches = yield executor.submit(
+            bcrypt.checkpw, tornado.escape.utf8(self.get_argument("password")),
+            tornado.escape.utf8(user['hashed_password']))
+        if matches:
+            self.set_secure_cookie("user", str(user['id']))
+            self.redirect(self.get_argument("next", "/"))
+        else:
+            self.render("login.html", error="incorrect password")
+
+class LogoutHandler(BaseHandler):
+    def get(self):
+        self.clear_cookie("user")
+        self.redirect(self.get_argument("next", "/"))
+
+
+class SignupHandler(BaseHandler):
+    def get(self):
+        self.render("signup.html")
+
+    @gen.coroutine
+    def post(self):
+        hashed_password = yield executor.submit(
+            bcrypt.hashpw, tornado.escape.utf8(self.get_argument("password")),
+            bcrypt.gensalt())
+
+        with conn.cursor() as curs:
+            curs.execute('''INSERT INTO users (email, name, hashed_password)
+                            VALUES (%s, %s, %s)''',
+                         (self.get_argument("email"), self.get_argument("name"),
+                          tornado.escape.native_str(hashed_password)))
+            conn.commit()
+            user_id = curs.fetchone()[0]
+
+        self.set_secure_cookie("user", str(user_id))
+        self.redirect(self.get_argument("next", "/"))
+
+
 settings = {
     "cookie_secret": os.environ.get('SECRET_COOKIE', ''),
-    "login_url": "/auth",
+    "login_url": "/login",
+    "template_path": os.path.join(os.path.dirname(__file__), "templates"),
+    "static_path": os.path.join(os.path.dirname(__file__), "static"),
 }
 
 
 def make_app():
     return tornado.web.Application([
+        (r"/", MainHandler),
         (r"/auth", AuthHandler),
         (r"/broadcast/(?P<aid>\d+)", BroadcastHandler),
+        (r"/login", LoginHandler),
+        (r"/logout", LogoutHandler),
+        (r"/signup", SignupHandler),
     ], **settings)
 
 
