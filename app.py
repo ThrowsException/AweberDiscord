@@ -12,7 +12,7 @@ import tornado.web
 
 conn = ''
 DB_CONNECTION = os.environ.get('DB_CONNECTION',
-                                'postgresql://postgres:example@localhost:5444')
+                               'postgresql://postgres:example@localhost:5444')
 
 try:
     conn = psycopg2.connect(DB_CONNECTION)
@@ -29,10 +29,11 @@ def get_token(aid):
         key = curs.fetchone()
     return key
 
+
 class AWeberMixin(tornado.auth.OAuthMixin):
 
     _OAUTH_REQUEST_TOKEN_URL = 'https://auth.aweber.com/1.0/oauth/request_token'
-    _OAUTH_AUTHORIZE_URL = 'https://auth.aweber.com/1.0/oauth/authorize';
+    _OAUTH_AUTHORIZE_URL = 'https://auth.aweber.com/1.0/oauth/authorize'
     _OAUTH_ACCESS_TOKEN_URL = 'https://auth.aweber.com/1.0/oauth/access_token'
     _OAUTH_VERSION = '1.0a'
 
