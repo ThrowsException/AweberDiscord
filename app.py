@@ -119,7 +119,8 @@ class BroadcastHandler(tornado.web.RequestHandler, AWeberMixin):
         utc = arrow.utcnow()
         send = utc.shift(minutes=2)
         schedule = yield self.aweber_request(
-            f'https://api.aweber.com/1.0/accounts/{aid}/lists/{access_token["list_id"]}/broadcasts/{r["broadcast_id"]}/schedule',
+            f'''https://api.aweber.com/1.0/accounts/
+            {aid}/lists/{access_token["list_id"]}/broadcasts/{r["broadcast_id"]}/schedule''',
             access_token, method='POST', post_args={'scheduled_for': send})
 
         self.set_header('Content-Type', 'application/json')
