@@ -37,7 +37,15 @@ def get_token(aid):
 
 class BaseHandler(tornado.web.RequestHandler):
     def get_current_user(self):
-        return self.get_secure_cookie("user")
+        user_id = self.get_secure_cookie("user")
+        if user_id is None:
+            return
+
+        user_id = user_id.decode('utf8')
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as curs:
+            curs.execute('''SELECT * FROM users
+                            WHERE id = %s;''', (user_id,))
+            return curs.fetchone()
 
 
 class AWeberMixin(tornado.auth.OAuthMixin):
@@ -62,13 +70,13 @@ class AWeberMixin(tornado.auth.OAuthMixin):
         aid = r['entries'][0]['id']
 
         with conn.cursor() as curs:
-            curs.execute('''INSERT INTO keys(aid, key, secret)
-                            VALUES (%s, %s, %s)
+            curs.execute(f'''INSERT INTO keys(aid, key, secret, user_id)
+                            VALUES (%s, %s, %s, %s)
                             ON CONFLICT (aid)
                             DO UPDATE SET
-                                (key, secret)
-                                 = (EXCLUDED.key, EXCLUDED.secret);''',
-                            (aid, access_token['key'], access_token['secret']))
+                                (key, secret, user_id)
+                                 = (EXCLUDED.key, EXCLUDED.secret, {self.current_user["id"]});''',
+                            (aid, access_token['key'], access_token['secret'], self.current_user["id"]))
             conn.commit()
         return {'user': r}
 
@@ -137,8 +145,9 @@ class BroadcastHandler(tornado.web.RequestHandler, AWeberMixin):
         self.write(schedule.body)
 
 
-class AuthHandler(tornado.web.RequestHandler, AWeberMixin):
+class AuthHandler(BaseHandler, AWeberMixin):
     @gen.coroutine
+    @tornado.web.authenticated
     def get(self):
         if self.get_argument('oauth_token', None):
             r = yield self.get_authenticated_user()
@@ -148,16 +157,18 @@ class AuthHandler(tornado.web.RequestHandler, AWeberMixin):
         yield self.authorize_redirect(callback_uri='auth')
 
     def _on_auth(self, user):
-        self.set_secure_cookie("u", json.dumps(user))
-        self.set_secure_cookie("user", json.dumps(user))
+        # self.set_secure_cookie("user", json.dumps(user))
         self.redirect("/")
 
 
 class MainHandler(BaseHandler):
     @tornado.web.authenticated
     def get(self):
-        name = tornado.escape.xhtml_escape(self.current_user)
-        self.write("Hello, " + name)
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as curs:
+            curs.execute('''SELECT * FROM keys WHERE user_id = %s''',
+                         (self.current_user['id'], ))
+            account = curs.fetchone()
+        self.render("home.html", account=account)
 
 
 class LoginHandler(BaseHandler):
@@ -179,6 +190,7 @@ class LoginHandler(BaseHandler):
             bcrypt.checkpw, tornado.escape.utf8(self.get_argument("password")),
             tornado.escape.utf8(user['hashed_password']))
         if matches:
+            print(str(user['id']))
             self.set_secure_cookie("user", str(user['id']))
             self.redirect(self.get_argument("next", "/"))
         else:
@@ -187,7 +199,7 @@ class LoginHandler(BaseHandler):
 class LogoutHandler(BaseHandler):
     def get(self):
         self.clear_cookie("user")
-        self.redirect(self.get_argument("next", "/"))
+        self.redirect(self.get_argument("next", "/login"))
 
 
 class SignupHandler(BaseHandler):

@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+
+{% block body %}
+  {% if account %}
+    <span style="color: red">Aweber account is linked</span><p>
+  {% else %}
+    <a href="/auth">Link Aweber Account</a>
+  {% end %}
+{% end %}
