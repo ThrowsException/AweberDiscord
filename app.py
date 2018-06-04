@@ -164,10 +164,18 @@ class AuthHandler(BaseHandler, AWeberMixin):
 class MainHandler(BaseHandler):
     @tornado.web.authenticated
     def get(self):
+        guild_id = self.get_argument('guild_id', None)
+        if guild_id is not None:
+            with conn.cursor() as curs:
+                curs.execute('''UPDATE keys set guild_id = %s WHERE user_id = %s''',
+                             (guild_id, self.current_user['id'],))
+                conn.commit()
+
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as curs:
             curs.execute('''SELECT * FROM keys WHERE user_id = %s''',
                          (self.current_user['id'], ))
             account = curs.fetchone()
+
         self.render("home.html", account=account)
 
 
@@ -240,6 +248,7 @@ def make_app():
         (r"/login", LoginHandler),
         (r"/logout", LogoutHandler),
         (r"/signup", SignupHandler),
+        (r"/discord", MainHandler),
     ], **settings)
 
 

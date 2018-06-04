@@ -3,7 +3,8 @@ CREATE TABLE keys (
     list_id     varchar(256),
     key       	varchar(256) NOT NULL,
     secret      varchar(256) NOT NULL,
-    user_id     integer REFERENCES users NOT NULL
+    user_id     integer REFERENCES users NOT NULL,
+    guild_id    varchar
 );
 
 CREATE TABLE users (

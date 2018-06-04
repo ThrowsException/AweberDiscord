@@ -2,8 +2,13 @@
 
 {% block body %}
   {% if account %}
-    <span style="color: red">Aweber account is linked</span><p>
+    <p>Aweber account is linked</p>
   {% else %}
     <a href="/auth">Link Aweber Account</a>
+  {% end %}
+  {% if account["guild_id"] %}
+    <p>Guild is linked {{ account["guild_id"] }}</p>
+  {% else %}
+     <a href="https://discordapp.com/api/oauth2/authorize?client_id=428369064499478542&permissions=0&redirect_uri=http%3A%2F%2Flocalhost%3A8888%2Fdiscord&response_type=code&scope=bot%20guilds">Add bot</a>
   {% end %}
 {% end %}
