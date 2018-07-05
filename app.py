@@ -120,7 +120,6 @@ class Discord(object):
         response = yield http_client.fetch(
             f'{self.API_ENDPOINT}/guilds/{guild_id}/channels',
             headers=headers)
-        print(response.body)
 
         return tornado.escape.json_decode(response.body)
 
@@ -137,30 +136,38 @@ class BroadcastHandler(tornado.web.RequestHandler, AWeberMixin):
         self.write(r.body)
 
     @gen.coroutine
-    def post(self, aid):
-        access_token = get_token(aid)
+    def post(self):
         data = tornado.escape.json_decode(self.request.body)
-        broadcast = {
-            'body_html': '',
-            'body_text': f'{data["message"]}',
-            'subject': f'{data["subject"]}'
-        }
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as curs:
+            curs.execute('''
+            SELECT *
+            FROM users
+            JOIN keys on user_id = id
+            WHERE channel_id = %s
+            ''', (data["channel"], ))
+            account = curs.fetchone()
+        access_token = get_token(account["aid"])
+        if account:
+            broadcast = {
+                'body_html': '',
+                'body_text': f'{data["message"]}',
+                'subject': f'{data["subject"]}'
+            }
 
-        r = yield self.aweber_request(
-            f'https://api.aweber.com/1.0/accounts/{aid}/lists/{access_token["list_id"]}/broadcasts',
-            access_token, method='POST', post_args=broadcast)
+            r = yield self.aweber_request(
+                f'https://api.aweber.com/1.0/accounts/{account["aid"]}/lists/{account["list_id"]}/broadcasts',
+                access_token, method='POST', post_args=broadcast)
 
-        r = tornado.escape.json_decode(r.body)
-
-        utc = arrow.utcnow()
-        send = utc.shift(minutes=2)
-        schedule = yield self.aweber_request(
-            f'''https://api.aweber.com/1.0/accounts/
-            {aid}/lists/{access_token["list_id"]}/broadcasts/{r["broadcast_id"]}/schedule''',
-            access_token, method='POST', post_args={'scheduled_for': send})
-
-        self.set_header('Content-Type', 'application/json')
-        self.write(schedule.body)
+            r = tornado.escape.json_decode(r.body)
+            utc = arrow.utcnow()
+            send = utc.shift(minutes=2)
+            schedule = yield self.aweber_request(
+                f'''https://api.aweber.com/1.0/accounts/{account["aid"]}/lists/{account["list_id"]}/broadcasts/{r["broadcast_id"]}/schedule''',
+                access_token, method='POST', post_args={'scheduled_for': send})
+            self.set_header('Content-Type', 'application/json')
+            self.write(schedule.body)
+        else:
+            self.set_status(500, 'channel not found')
 
 
 class AuthHandler(BaseHandler, AWeberMixin):
@@ -289,7 +296,7 @@ def make_app():
     return tornado.web.Application([
         (r"/", MainHandler),
         (r"/auth", AuthHandler),
-        (r"/broadcast/(?P<aid>\d+)", BroadcastHandler),
+        (r"/broadcast", BroadcastHandler),
         (r"/login", LoginHandler),
         (r"/logout", LogoutHandler),
         (r"/signup", SignupHandler),
