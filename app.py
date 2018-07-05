@@ -12,6 +12,7 @@ import tornado.auth
 import tornado.concurrent
 import tornado.ioloop
 import tornado.web
+from tornado.httpclient import AsyncHTTPClient
 
 conn = ''
 DB_CONNECTION = os.environ.get('DB_CONNECTION',
@@ -106,6 +107,23 @@ class AWeberMixin(tornado.auth.OAuthMixin):
 
         return response
 
+class Discord(object):
+    API_ENDPOINT = 'https://discordapp.com/api/v6'
+
+    @gen.coroutine
+    def list_channels(self, guild_id):
+        headers = {
+            'Authorization': 'Bot {}'.format(os.environ.get('BOT_TOKEN', '')),
+            'User-Agent': 'DiscordBot (https://www.github.com/throwsexception 6) Python'
+        }
+        http_client = AsyncHTTPClient()
+        response = yield http_client.fetch(
+            f'{self.API_ENDPOINT}/guilds/{guild_id}/channels',
+            headers=headers)
+        print(response.body)
+
+        return tornado.escape.json_decode(response.body)
+
 
 class BroadcastHandler(tornado.web.RequestHandler, AWeberMixin):
     @gen.coroutine
@@ -162,6 +180,7 @@ class AuthHandler(BaseHandler, AWeberMixin):
 
 
 class MainHandler(BaseHandler):
+    @gen.coroutine
     @tornado.web.authenticated
     def get(self):
         guild_id = self.get_argument('guild_id', None)
@@ -175,9 +194,35 @@ class MainHandler(BaseHandler):
             curs.execute('''SELECT * FROM keys WHERE user_id = %s''',
                          (self.current_user['id'], ))
             account = curs.fetchone()
+            channels = []
 
-        self.render("home.html", account=account)
+            if account and account['guild_id']:
+                discord = Discord()
+                channels = yield discord.list_channels(account['guild_id'])
 
+        self.render("home.html", account=account, channels=channels)
+
+    @gen.coroutine
+    @tornado.web.authenticated
+    def post(self):
+        channel = self.get_argument('channel', None)
+        if channel is not None:
+            with conn.cursor() as curs:
+                curs.execute('''UPDATE users set channel_id = %s WHERE id = %s''',
+                             (channel, self.current_user['id'],))
+                conn.commit()
+        self.current_user['channel_id'] = channel
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as curs:
+            curs.execute('''SELECT * FROM keys WHERE user_id = %s''',
+                         (self.current_user['id'], ))
+            account = curs.fetchone()
+            channels = []
+
+            if account and account['guild_id']:
+                discord = Discord()
+                channels = yield discord.list_channels(account['guild_id'])
+
+        self.render("home.html", account=account, channels=channels)
 
 class LoginHandler(BaseHandler):
     def get(self):
