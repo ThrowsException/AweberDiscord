@@ -3,7 +3,8 @@ CREATE TABLE users (
     email           varchar NOT NULL UNIQUE,
     name            varchar NOT NULL,
     hashed_password varchar NOT NULL,
-    channel_id      varchar
+    channel_id      varchar,
+    list_id      varchar
 );
 
 CREATE TABLE keys (

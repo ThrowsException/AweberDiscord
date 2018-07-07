@@ -3,6 +3,18 @@
 {% block body %}
   {% if account %}
     <p>Aweber account is linked</p>
+    <form action="/" method="POST">
+    {% for list in lists %}
+      <div class="form-check">
+        <input class="form-check-input" type="radio"
+        name="list" value="{{ list["id"] }}"
+        id="{{ list["id"] }}"
+        {% if current_user["list_id"] == str(list["id"]) %} checked {% end %} />
+        <label class="form-check-label" for="{{ list["id"] }}">{{ escape(list["name"]) }} {{ list["id"] }} {{ current_user["list_id"] }}</label>
+      </div>
+    {% end %}
+    <button type="submit" class="btn btn-primary">Submit</button>
+    </form>
   {% else %}
     <a href="/auth">Link Aweber Account</a>
   {% end %}

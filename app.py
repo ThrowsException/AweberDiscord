@@ -186,7 +186,7 @@ class AuthHandler(BaseHandler, AWeberMixin):
         self.redirect("/")
 
 
-class MainHandler(BaseHandler):
+class MainHandler(BaseHandler, AWeberMixin):
     @gen.coroutine
     @tornado.web.authenticated
     def get(self):
@@ -207,18 +207,33 @@ class MainHandler(BaseHandler):
                 discord = Discord()
                 channels = yield discord.list_channels(account['guild_id'])
 
-        self.render("home.html", account=account, channels=channels)
+            r = yield self.aweber_request(
+                f'https://api.aweber.com/1.0/accounts/{account["aid"]}/lists',
+                account)
+            lists = tornado.escape.json_decode(r.body)
+
+        self.render("home.html",
+                    account=account,
+                    channels=channels, lists=lists["entries"])
 
     @gen.coroutine
     @tornado.web.authenticated
     def post(self):
         channel = self.get_argument('channel', None)
+        list_id = self.get_argument('list', None)
         if channel is not None:
             with conn.cursor() as curs:
                 curs.execute('''UPDATE users set channel_id = %s WHERE id = %s''',
                              (channel, self.current_user['id'],))
                 conn.commit()
-        self.current_user['channel_id'] = channel
+            self.current_user['channel_id'] = channel
+        if list_id is not None:
+            with conn.cursor() as curs:
+                curs.execute('''UPDATE users set list_id = %s WHERE id = %s''',
+                             (list_id, self.current_user['id'],))
+                conn.commit()
+            self.current_user['list_id'] = list_id
+
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as curs:
             curs.execute('''SELECT * FROM keys WHERE user_id = %s''',
                          (self.current_user['id'], ))
@@ -229,7 +244,15 @@ class MainHandler(BaseHandler):
                 discord = Discord()
                 channels = yield discord.list_channels(account['guild_id'])
 
-        self.render("home.html", account=account, channels=channels)
+            r = yield self.aweber_request(
+                f'https://api.aweber.com/1.0/accounts/{account["aid"]}/lists',
+                account)
+            lists = tornado.escape.json_decode(r.body)
+
+        self.render("home.html",
+                    account=account,
+                    channels=channels,
+                    lists=lists["entries"])
 
 class LoginHandler(BaseHandler):
     def get(self):
@@ -250,7 +273,6 @@ class LoginHandler(BaseHandler):
             bcrypt.checkpw, tornado.escape.utf8(self.get_argument("password")),
             tornado.escape.utf8(user['hashed_password']))
         if matches:
-            print(str(user['id']))
             self.set_secure_cookie("user", str(user['id']))
             self.redirect(self.get_argument("next", "/"))
         else:
