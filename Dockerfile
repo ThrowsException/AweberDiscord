@@ -2,7 +2,7 @@
 FROM python:3.6-alpine3.7
 
 RUN apk update && \
-    apk add --virtual build-deps gcc python-dev musl-dev && \
+    apk add --virtual build-deps gcc python-dev musl-dev libffi-dev && \
     apk add postgresql-dev
 
 
