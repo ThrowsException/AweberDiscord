@@ -116,6 +116,7 @@ class Discord(object):
             'Authorization': 'Bot {}'.format(os.environ.get('BOT_TOKEN', '')),
             'User-Agent': 'DiscordBot (https://www.github.com/throwsexception 6) Python'
         }
+
         http_client = AsyncHTTPClient()
         response = yield http_client.fetch(
             f'{self.API_ENDPOINT}/guilds/{guild_id}/channels',
@@ -202,15 +203,16 @@ class MainHandler(BaseHandler, AWeberMixin):
                          (self.current_user['id'], ))
             account = curs.fetchone()
             channels = []
+            lists = {"entries": []}
 
             if account and account['guild_id']:
                 discord = Discord()
                 channels = yield discord.list_channels(account['guild_id'])
-
-            r = yield self.aweber_request(
-                f'https://api.aweber.com/1.0/accounts/{account["aid"]}/lists',
-                account)
-            lists = tornado.escape.json_decode(r.body)
+            if account and account['aid']:
+                r = yield self.aweber_request(
+                    f'https://api.aweber.com/1.0/accounts/{account["aid"]}/lists',
+                    account)
+                lists = tornado.escape.json_decode(r.body)
 
         self.render("home.html",
                     account=account,
@@ -290,17 +292,20 @@ class SignupHandler(BaseHandler):
 
     @gen.coroutine
     def post(self):
-        hashed_password = yield executor.submit(
-            bcrypt.hashpw, tornado.escape.utf8(self.get_argument("password")),
+        hashed_password = bcrypt.hashpw(
+            tornado.escape.utf8(self.get_argument("password")),
             bcrypt.gensalt())
 
-        with conn.cursor() as curs:
-            curs.execute('''INSERT INTO users (email, name, hashed_password)
-                            VALUES (%s, %s, %s)''',
-                         (self.get_argument("email"), self.get_argument("name"),
-                          tornado.escape.native_str(hashed_password)))
-            conn.commit()
-            user_id = curs.fetchone()[0]
+        try:
+            with conn.cursor() as curs:
+                curs.execute('''INSERT INTO users (email, name, hashed_password)
+                                VALUES (%s, %s, %s)''',
+                             (self.get_argument("email"), self.get_argument("name"),
+                              tornado.escape.native_str(hashed_password)))
+                conn.commit()
+                user_id = curs.fetchone()[0]
+        except Exception as e:
+            print(e)
 
         self.set_secure_cookie("user", str(user_id))
         self.redirect(self.get_argument("next", "/"))
